@@ -84,7 +84,7 @@ def main():
             return
 
         # Only search hotels for one night: (start_date) to (start_date+1)
-        if st.button("2) Search Hotels for the FIRST Night"):
+        if st.button("2) Search Hotels (Uses Start-Date)"):
             one_night_end = start_date + datetime.timedelta(days=1)
             all_hotels = []
 
