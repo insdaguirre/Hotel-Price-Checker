@@ -13,17 +13,21 @@ if "hotels_list" not in st.session_state:
     st.session_state.hotels_list = []
 if "chosen_hotel" not in st.session_state:
     st.session_state.chosen_hotel = None
+if "start_date" not in st.session_state:
+    st.session_state.start_date = datetime.date.today()
+if "end_date" not in st.session_state:
+    st.session_state.end_date = datetime.date.today()
+
 
 def main():
     st.title("Hotel Price Checker")
 
-    rapidapi_key = "8e6943c05cmsh7ba5b7710610ce2p170db9jsnb665cc42e169"  # replace with yours
+    rapidapi_key = "8e6943c05cmsh7ba5b7710610ce2p170db9jsnb665cc42e169"  # Replace with your own key
     headers = {
         "x-rapidapi-key": rapidapi_key,
         "x-rapidapi-host": "booking-com15.p.rapidapi.com"
     }
 
-    # ---- Step 1: Destination Search ----
     # ---- Step 1: Destination Search ----
     st.subheader("Step 1: Search for a Destination")
 
@@ -42,15 +46,13 @@ def main():
                     data = resp.json() or {}
                 except requests.exceptions.RequestException as e:
                     st.error(f"[Error] Could not fetch destinations: {e}")
-                    return  # <--- valid, because we are inside main()
+                    return
 
                 st.session_state.destinations_list = data.get("data", [])
-
                 if not st.session_state.destinations_list:
                     st.warning(f"No destinations found matching '{location_query}'.")
             else:
                 st.warning("No location provided. Please enter a location name.")
-
 
     # If we already have destinations, let user pick from them
     if st.session_state.destinations_list:
@@ -60,13 +62,12 @@ def main():
         ]
         chosen_dest_label = st.selectbox("Select a destination:", dest_options)
 
-        # figure out which item is chosen
         if chosen_dest_label:
             chosen_index = dest_options.index(chosen_dest_label)
             chosen_dest = st.session_state.destinations_list[chosen_index]
-            st.session_state.chosen_dest = chosen_dest  # store in session_state
+            st.session_state.chosen_dest = chosen_dest
 
-    # ---- Step 2: Date Range + Search Hotels ----
+    # ---- Step 2: Date Range + Search Hotels (only for the FIRST NIGHT) ----
     if st.session_state.chosen_dest:
         chosen_dest_id = st.session_state.chosen_dest.get("dest_id")
         chosen_search_type = st.session_state.chosen_dest.get("search_type", "CITY")
@@ -75,27 +76,25 @@ def main():
 
         # date inputs
         st.subheader("Step 2: Choose date range:")
-        start_date = st.date_input("Start date", datetime.date.today(), key="start_date")
-        end_date = st.date_input("End date", datetime.date.today(), key="end_date")
+        start_date = st.date_input("Start date", st.session_state.start_date, key="start_date")
+        end_date = st.date_input("End date", st.session_state.end_date, key="end_date")
 
         if start_date > end_date:
             st.warning("End date must be on or after start date.")
             return
 
-        start_date_str = str(start_date)
-        end_date_str = str(end_date)
-
-        if st.button("2) Search Hotels for this Destination"):
+        # Only search hotels for one night: (start_date) to (start_date+1)
+        if st.button("2) Search Hotels for the FIRST Night"):
+            one_night_end = start_date + datetime.timedelta(days=1)
             all_hotels = []
 
-            # Loop through pages 1 to 3, this can be adjusted 
             for page_num in range(1, 4):
                 search_hotels_url = "https://booking-com15.p.rapidapi.com/api/v1/hotels/searchHotels"
                 params = {
                     "dest_id": chosen_dest_id,
                     "search_type": chosen_search_type,
-                    "arrival_date": start_date_str,
-                    "departure_date": end_date_str,
+                    "arrival_date": str(start_date),
+                    "departure_date": str(one_night_end),
                     "adults": "1",
                     "room_qty": "1",
                     "page_number": str(page_num),
@@ -110,22 +109,21 @@ def main():
                     response_data = hotels_resp.json() or {}
                 except requests.exceptions.RequestException as e:
                     st.error(f"[Error] Could not fetch hotels on page {page_num}: {e}")
-                    return  # <--- still valid, inside main()
+                    return
 
                 data_section = response_data.get("data", {})
                 hotels_list = data_section.get("hotels", [])
                 all_hotels.extend(hotels_list)
 
             if not all_hotels:
-                st.warning("No hotels found for the given criteria (pages 1-3).")
+                st.warning("No hotels found for the single-night search (pages 1-3).")
                 return
 
-            # store the combined hotels in session state
             st.session_state.hotels_list = all_hotels
 
-    # ---- Step 3: Choose Hotel + Availability ----
+    # ---- Step 3: Choose Hotel + Individual Night Availability Over the Full Range ----
     if st.session_state.hotels_list:
-        st.subheader("Step 3: Select a hotel:")
+        st.subheader("Step 3: Select a Hotel:")
         hotel_options = [
             f"{i+1}. {h['property']['name']} (hotel_id={h['property'].get('id')})"
             for i, h in enumerate(st.session_state.hotels_list)
@@ -146,66 +144,75 @@ def main():
 
         check_availability_btn = st.button("3) Check Availability & Generate CSV")
         if check_availability_btn and chosen_hotel_id:
-            # prepare date range from session_state keys
             start_date = st.session_state.start_date
             end_date = st.session_state.end_date
-            start_date_str = str(start_date)
-            end_date_str = str(end_date)
 
-            availability_url = "https://booking-com15.p.rapidapi.com/api/v1/hotels/getAvailability"
-            availability_params = {
-                "hotel_id": str(chosen_hotel_id),
-                "min_date": start_date_str,
-                "max_date": end_date_str,
-                "adults": "1",
-                "room_qty": "1",
-                "currency_code": "USD"
-            }
+            # We'll make a separate API call for each night in the date range
+            current_night = start_date
+            nightly_prices = {}
 
-            try:
-                avail_resp = requests.get(
-                    availability_url, headers=headers, params=availability_params, timeout=10
-                )
-                avail_resp.raise_for_status()
-                availability_json = avail_resp.json() or {}
-            except requests.exceptions.RequestException as e:
-                st.error(f"[Error] Could not fetch availability: {e}")
+            while current_night < end_date:
+                arrival_str = current_night.strftime("%Y-%m-%d")
+                departure = current_night + datetime.timedelta(days=1)
+                departure_str = departure.strftime("%Y-%m-%d")
+
+                # If departure goes beyond end_date, break out (no partial nights)
+                if departure > end_date:
+                    break
+
+                # Make an API call for this single night
+                availability_url = "https://booking-com15.p.rapidapi.com/api/v1/hotels/getAvailability"
+                availability_params = {
+                    "hotel_id": str(chosen_hotel_id),
+                    "min_date": arrival_str,
+                    "max_date": departure_str,
+                    "adults": "1",
+                    "room_qty": "1",
+                    "currency_code": "USD",
+                }
+
+                # Default to 'null' unless we find a price
+                price_for_this_night = "null"
+
+                try:
+                    avail_resp = requests.get(
+                        availability_url, headers=headers, params=availability_params, timeout=10
+                    )
+                    avail_resp.raise_for_status()
+                    availability_json = avail_resp.json() or {}
+                except requests.exceptions.RequestException as e:
+                    st.error(f"[Error] Could not fetch availability for {arrival_str}: {e}")
+                    return
+
+                data_avail = availability_json.get("data", {})
+                av_dates_list = data_avail.get("avDates", [])
+
+                # avDates is typically a list of dicts: [{"YYYY-MM-DD": price}, ...]
+                if isinstance(av_dates_list, list) and av_dates_list:
+                    for date_obj in av_dates_list:
+                        if isinstance(date_obj, dict):
+                            for date_str_av, p_val in date_obj.items():
+                                # If this date matches our arrival date, record the price
+                                if date_str_av == arrival_str:
+                                    price_for_this_night = p_val
+                                    break
+                            if price_for_this_night != "null":
+                                break
+
+                nightly_prices[current_night] = price_for_this_night
+                current_night = departure
+
+            if not nightly_prices:
+                st.warning("No availability found across the specified date range.")
                 return
 
-            data_avail = availability_json.get("data", {})
-            av_dates_list = data_avail.get("avDates", [])
-
-            if not isinstance(av_dates_list, list) or not av_dates_list:
-                st.warning("No 'avDates' found in availability response.")
-                st.write("Full response:", availability_json)
-                return
-
-            # Parse avDates, keep min price
-            lowest_prices = {}
-            for date_obj in av_dates_list:
-                if not isinstance(date_obj, dict):
-                    continue
-                for date_str_av, price_val in date_obj.items():
-                    try:
-                        parsed_date = datetime.datetime.strptime(date_str_av, "%Y-%m-%d").date()
-                    except ValueError:
-                        continue
-                    if start_date <= parsed_date <= end_date:
-                        current_price = lowest_prices.get(parsed_date)
-                        if current_price is None or price_val < current_price:
-                            lowest_prices[parsed_date] = price_val
-
-            if not lowest_prices:
-                st.warning("No availability within the specified date range.")
-                return
-
-            # Write CSV
+            # Write CSV: columns = [night, price]
             output = io.StringIO()
             writer = csv.writer(output)
             writer.writerow(["night", "price"])
-            for date_obj in sorted(lowest_prices.keys()):
-                date_str_csv = date_obj.strftime("%Y-%m-%d")
-                price_val = lowest_prices[date_obj]
+            for night_date in sorted(nightly_prices.keys()):
+                date_str_csv = night_date.strftime("%Y-%m-%d")
+                price_val = nightly_prices[night_date]
                 writer.writerow([date_str_csv, price_val])
 
             csv_data = output.getvalue().encode("utf-8")
@@ -218,6 +225,7 @@ def main():
                 file_name="hotel_availability.csv",
                 mime="text/csv"
             )
+
 
 if __name__ == "__main__":
     main()
