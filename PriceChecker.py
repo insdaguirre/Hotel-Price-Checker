@@ -88,7 +88,7 @@ def main():
             one_night_end = start_date + datetime.timedelta(days=1)
             all_hotels = []
 
-            for page_num in range(1, 4):
+            for page_num in range(1, 6):
                 search_hotels_url = "https://booking-com15.p.rapidapi.com/api/v1/hotels/searchHotels"
                 params = {
                     "dest_id": chosen_dest_id,
