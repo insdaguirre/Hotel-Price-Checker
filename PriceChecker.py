@@ -4,7 +4,7 @@ import datetime
 import csv
 import io
 
-# Initialize session state variables, if they don't exist yet
+# Remove manual session-state initialization for dates
 if "destinations_list" not in st.session_state:
     st.session_state.destinations_list = []
 if "chosen_dest" not in st.session_state:
@@ -13,11 +13,6 @@ if "hotels_list" not in st.session_state:
     st.session_state.hotels_list = []
 if "chosen_hotel" not in st.session_state:
     st.session_state.chosen_hotel = None
-if "start_date" not in st.session_state:
-    st.session_state.start_date = datetime.date.today()
-if "end_date" not in st.session_state:
-    st.session_state.end_date = datetime.date.today()
-
 
 def main():
     st.title("Hotel Price Checker")
@@ -46,7 +41,7 @@ def main():
                     data = resp.json() or {}
                 except requests.exceptions.RequestException as e:
                     st.error(f"[Error] Could not fetch destinations: {e}")
-                    return
+                    st.stop()
 
                 st.session_state.destinations_list = data.get("data", [])
                 if not st.session_state.destinations_list:
@@ -74,20 +69,26 @@ def main():
         st.write(f"You selected: {st.session_state.chosen_dest.get('label')}")
         st.write(f"dest_id={chosen_dest_id}, search_type={chosen_search_type}")
 
-        # date inputs
         st.subheader("Step 2: Choose date range:")
-        start_date = st.date_input("Start date", st.session_state.start_date, key="start_date")
-        end_date = st.date_input("End date", st.session_state.end_date, key="end_date")
 
+        # Directly use date_input with default = today
+        start_date = st.date_input("Start date", datetime.date.today(), key="start_date")
+        end_date = st.date_input("End date", datetime.date.today(), key="end_date")
+
+        # Debug print (optional)
+        #st.write("DEBUG: start_date =", start_date, "end_date =", end_date)
+
+        # Enforce end_date >= start_date
         if start_date > end_date:
             st.warning("End date must be on or after start date.")
-            return
+            st.stop()
 
         # Only search hotels for one night: (start_date) to (start_date+1)
-        if st.button("2) Search Hotels (Uses Start-Date)"):
+        if st.button("2) Search Hotels (Uses FIRST Night)"):
             one_night_end = start_date + datetime.timedelta(days=1)
             all_hotels = []
 
+            # Try pages 1 to 5
             for page_num in range(1, 6):
                 search_hotels_url = "https://booking-com15.p.rapidapi.com/api/v1/hotels/searchHotels"
                 params = {
@@ -109,15 +110,15 @@ def main():
                     response_data = hotels_resp.json() or {}
                 except requests.exceptions.RequestException as e:
                     st.error(f"[Error] Could not fetch hotels on page {page_num}: {e}")
-                    return
+                    st.stop()
 
                 data_section = response_data.get("data", {})
                 hotels_list = data_section.get("hotels", [])
                 all_hotels.extend(hotels_list)
 
             if not all_hotels:
-                st.warning("No hotels found for the single-night search (pages 1-3).")
-                return
+                st.warning("No hotels found for the single-night search (pages 1-5).")
+                st.stop()
 
             st.session_state.hotels_list = all_hotels
 
@@ -144,10 +145,10 @@ def main():
 
         check_availability_btn = st.button("3) Check Availability & Generate CSV")
         if check_availability_btn and chosen_hotel_id:
+            # Retrieve the final date values
             start_date = st.session_state.start_date
             end_date = st.session_state.end_date
 
-            # We'll make a separate API call for each night in the date range
             current_night = start_date
             nightly_prices = {}
 
@@ -171,7 +172,6 @@ def main():
                     "currency_code": "USD",
                 }
 
-                # Default to 'null' unless we find a price
                 price_for_this_night = "null"
 
                 try:
@@ -182,12 +182,11 @@ def main():
                     availability_json = avail_resp.json() or {}
                 except requests.exceptions.RequestException as e:
                     st.error(f"[Error] Could not fetch availability for {arrival_str}: {e}")
-                    return
+                    st.stop()
 
                 data_avail = availability_json.get("data", {})
                 av_dates_list = data_avail.get("avDates", [])
 
-                # avDates is typically a list of dicts: [{"YYYY-MM-DD": price}, ...]
                 if isinstance(av_dates_list, list) and av_dates_list:
                     for date_obj in av_dates_list:
                         if isinstance(date_obj, dict):
@@ -204,7 +203,7 @@ def main():
 
             if not nightly_prices:
                 st.warning("No availability found across the specified date range.")
-                return
+                st.stop()
 
             # Write CSV: columns = [night, price]
             output = io.StringIO()
@@ -218,14 +217,12 @@ def main():
             csv_data = output.getvalue().encode("utf-8")
             st.success("CSV generated! Columns: night, price")
 
-            # Provide a download button
             st.download_button(
                 label="Download availability CSV",
                 data=csv_data,
                 file_name="hotel_availability.csv",
                 mime="text/csv"
             )
-
 
 if __name__ == "__main__":
     main()
