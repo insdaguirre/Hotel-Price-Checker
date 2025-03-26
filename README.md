@@ -2,7 +2,7 @@
 
 **A lightweight tool that helps you find the cheapest hotel rates over a given time period.**  
 
-🚀 **Live Demo**: [Your Streamlit App URL Here](#)  
+🚀 **Live Demo**: [Streamlit Prototype](https://hotel-price-checker.streamlit.app/)  
 
 ---
 
@@ -27,7 +27,7 @@
 
 ## 🚀 How to Use  
 
-1. **Visit the App**: Click the link to access the tool → [Your Streamlit App URL Here](#)  
+1. **Visit the App**: Click the link to access the tool → [Streamlit Prototype](https://hotel-price-checker.streamlit.app/)  
 2. **Enter Search Details**:  
    - Choose check-in and check-out dates  
    - Select your destination  
